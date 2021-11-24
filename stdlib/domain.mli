@@ -61,9 +61,11 @@ module DLS : sig
     type 'a key
     (** Type of a DLS key *)
 
-    val new_key : ?parent: bool -> (unit -> 'a) -> 'a key
+    val new_key : (unit -> 'a) -> 'a key
     (** [new_key f] returns a new key bound to initialiser [f] for accessing
         domain-local variable. *)
+
+    val new_parent_initialized_key : (unit -> 'a) -> ('a -> 'a) -> 'a key
 
     val set : 'a key -> 'a -> unit
     (** [set k v] updates the calling domain's domain-local state to associate

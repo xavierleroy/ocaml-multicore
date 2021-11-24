@@ -62,20 +62,11 @@ module DLS = struct
 
   type 'a key = int * (unit -> 'a)
 
-  type anykey = Anykey: 'a key -> anykey
-
   let key_counter = Atomic.make 0
 
-  let parent_keys = Atomic.make ([] : anykey list)
-
-  let rec atomic_add x al =
-    let l = Atomic.get al in
-    if not (Atomic.compare_and_set al l (x :: l)) then atomic_add x al
-
-  let new_key ?(parent = false) f =
-    let k = (Atomic.fetch_and_add key_counter 1, f) in
-    if parent then atomic_add (Anykey k) parent_keys;
-    k
+  let new_key f =
+    let k = Atomic.fetch_and_add key_counter 1 in
+    (k, f)
 
   (* If necessary, grow the current domain's local state array such that [idx]
    * is a valid index in the array. *)
@@ -110,16 +101,32 @@ module DLS = struct
       Obj.magic v'
     else Obj.magic v
 
+  type key_initializer =
+    KI: int * (unit -> 'a) * ('a -> 'a) -> key_initializer
+
+  let parent_keys = Atomic.make ([] : key_initializer list)
+
+  let rec atomic_add x al =
+    let l = Atomic.get al in
+    if not (Atomic.compare_and_set al l (x :: l)) then atomic_add x al
+
+  let new_parent_initialized_key (init: unit -> 'a) (generate: 'a -> 'a) =
+    let idx = Atomic.fetch_and_add key_counter 1 in
+    let k = (idx, init)
+    and ki = KI(idx, init, generate) in
+    atomic_add ki parent_keys;
+    k
+
   let get_initial_keys () : (int * Obj.t) list =
     List.map
-      (function Anykey(idx, init) -> (idx, Obj.repr (init ())))
+      (fun (KI (idx, init, generate)) ->
+           (idx, Obj.repr (generate (get (idx, init)))))
       (Atomic.get parent_keys)
 
   let set_initial_keys (l: (int * Obj.t) list) =
     List.iter
       (fun (idx, v) -> 
-        let st = maybe_grow idx in
-        st.(idx) <- Obj.repr (Sys.opaque_identity v))
+        let st = maybe_grow idx in st.(idx) <- v)
       l
 
 end
